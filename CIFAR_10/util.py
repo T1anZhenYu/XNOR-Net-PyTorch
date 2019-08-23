@@ -1,6 +1,6 @@
 import torch.nn as nn
 import numpy
-
+from torch.autograd import Variable
 class BinOp():
     def __init__(self, model):
         # count the number of Conv2d
@@ -80,3 +80,31 @@ class BinOp():
                     .sum(2, keepdim=True).sum(1, keepdim=True).div(n).expand(s)
             m_add = m_add.mul(weight.sign())
             self.target_modules[index].grad.data = m.add(m_add).mul(1.0-1.0/s[1]).mul(n)
+
+class MYBN(nn.Module):
+    def __init__(self,channel,decay=0.9,eps=0.00001,affine= True):
+        super(MYBN,self).__init__()
+        self.channel= channel
+        if affine:
+            self.gamma = Variable(torch.ones(channel,dtype=torch.float),requires_grad = True)
+            self.beta = Variable(torch.zeros(channel,dtype=torch.float),requires_grad = True)
+        else:
+            self.gamma = Variable(torch.ones(channel,dtype=torch.float))
+            self.beta = Variable(torch.zeros(channel,dtype=torch.float))         
+        self.moving_mean = Variable(torch.zeros(channel,dtype=torch.float))
+        self.moving_var = Variable(torch.ones(channel,dtype=torch.float))       
+        self.decay = decay
+    def forward(self,x):
+        x = torch.transpose(x,1,3)
+        c_max = torch.max(torch.max(torch.max(x,dim=0)[0],dim=0)[0],dim=0)[0]
+        c_min = torch.min(torch.min(torch.min(x,dim=0)[0],dim=0)[0],dim=0)[0]
+                                   
+        mean = (c_max+c_min)/2
+        var = (c_max-c_min)/2 + eps
+                                   
+        if self.training:
+            self.moving_mean = self.decay * self.moving_mean + (1-self.decay) * mean
+            self.moving_var = self.decay * self.moving_var + (1-self.decay)*var 
+            return self.gamma*(x - mean)/var + self.beta
+        else:
+            return self.gamma*(x-self.moving_mean)/self.moving_var + self.beta
